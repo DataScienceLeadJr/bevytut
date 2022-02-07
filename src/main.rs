@@ -1,12 +1,20 @@
+use std::collections::HashSet;
+use std::path::Path;
+
+use bevy::math::Vec3Swizzles;
+use bevy::render::texture::ImageType;
+use bevy::{
+    prelude::*,
+    sprite::collide_aabb::collide,
+};
+
 mod player;
 mod enemy;
 
-use std::collections::HashSet;
-
-use bevy::{prelude::*, sprite::collide_aabb::collide};
 use enemy::EnemyPlugin;
 use player::PlayerPlugin;
 
+const SPRITE_DIR: &str = "assets";
 const PLAYER_SPRITE: &str = "player_a_01.png";
 const PLAYER_LASER_SPRITE: &str = "laser_a_01.png";
 const ENEMY_LASER_SPRITE: &str = "laser_b_01.png";
@@ -15,21 +23,20 @@ const EXPLOSION_SHEET: &str = "explo_a_sprite.png";
 
 const TIME_STEP: f32 = 1.0 / 60.0;
 const SCALE: f32 = 0.5;
-const MAX_ENEMIES: u32 = 8;
-const MAX_FORMATION_MEMBERS: u32 = 3;
+const MAX_ENEMIES: u32 = 6;
+const MAX_FORMATION_MEMBERS: u32 = 2;
 const PLAYER_RESPAWN_DELAY: f64 = 2.0;
 
 // region:      Resources
-pub struct Materials {
-    player_materials: Handle<ColorMaterial>,
-    player_laser: Handle<ColorMaterial>,
-    enemy_laser: Handle<ColorMaterial>,
-    enemy: Handle<ColorMaterial>,
+pub struct SpriteInfos {
+    player: (Handle<Image>, Vec2),
+    player_laser: (Handle<Image>, Vec2),
+    enemy: (Handle<Image>, Vec2),
+    enemy_laser: (Handle<Image>, Vec2),
     explosion: Handle<TextureAtlas>,
 }
 
 struct WinSize {
-    #[allow(unused)]
     width: f32,
     height: f32,
 }
@@ -62,17 +69,33 @@ impl PlayerState {
 // endregion:   Resources
 
 // region:      Components
+
+#[derive(Component)]
 struct Laser;
+
+#[derive(Component)]
 struct Player;
+
+#[derive(Component)]
 struct PlayerReadyFire(bool);
+
+#[derive(Component)]
 struct FromPlayer;
 
+
+#[derive(Component)]
 struct Enemy;
+
+#[derive(Component)]
 struct FromEnemy;
 
+#[derive(Component)]
 struct Explosion;
+
+#[derive(Component)]
 struct ExplosionToSpawn(Vec3);
 
+#[derive(Component)]
 struct Speed(f32);
 impl Default for Speed {
     fn default() -> Self {
@@ -82,8 +105,8 @@ impl Default for Speed {
 // endregion:   Components
 
 fn main() {
-    App::build()
-        .insert_resource(ClearColor(Color::rgb(0.04,0.04,0.04)))
+    App::new()
+        .insert_resource(ClearColor(Color::rgb(0.04, 0.04, 0.04)))
         .insert_resource(WindowDescriptor {
             title: "Rust Invaders!".to_string(),
             width: 598.0,
@@ -92,9 +115,9 @@ fn main() {
         })
         .insert_resource(ActiveEnemies(0))
         .add_plugins(DefaultPlugins)
-        .add_startup_system(setup.system())
         .add_plugin(PlayerPlugin)
         .add_plugin(EnemyPlugin)
+        .add_startup_system(setup)
         .add_system(player_laser_hit_enemy.system())
         .add_system(enemy_laser_hit_player.system())
         .add_system(explosion_to_spawn.system())
@@ -105,28 +128,30 @@ fn main() {
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut windows: ResMut<Windows>,
 ) {
     let window = windows.get_primary_mut().unwrap();
+
     // camera
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
     // create the main resources
+    let texture_handle = asset_server.load(EXPLOSION_SHEET);
+    let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(64.0, 64.0), 4, 4);
+
+    commands.insert_resource(SpriteInfos {
+        player: load_image(&mut images, PLAYER_SPRITE),
+        player_laser: load_image(&mut images, PLAYER_LASER_SPRITE),
+        enemy: load_image(&mut images, ENEMY_SPRITE),
+        enemy_laser: load_image(&mut images, ENEMY_LASER_SPRITE),
+        explosion: texture_atlases.add(texture_atlas)
+    });
+
     commands.insert_resource(WinSize {
         width: window.width(),
         height: window.height(),
-    });
-
-    let texture_handle = asset_server.load(EXPLOSION_SHEET);
-    let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(64.0, 64.0), 4, 4);
-    commands.insert_resource(Materials {
-        player_materials: materials.add(asset_server.load(PLAYER_SPRITE).into()),
-        player_laser: materials.add(asset_server.load(PLAYER_LASER_SPRITE).into()),
-        enemy_laser: materials.add(asset_server.load(ENEMY_LASER_SPRITE).into()),
-        enemy: materials.add(asset_server.load(ENEMY_SPRITE).into()),
-        explosion: texture_atlases.add(texture_atlas)
     });
 
     // position window
@@ -134,23 +159,37 @@ fn setup(
 
 }
 
+fn load_image(images: &mut ResMut<Assets<Image>>, path: &str) -> (Handle<Image>, Vec2) {
+    let path = Path::new(SPRITE_DIR).join(path);
+    let bytes = std::fs::read(&path).expect(&format!("Cannot find {}", path.display()));
+    let image = Image::from_buffer(&bytes, ImageType::MimeType("image/png")).unwrap();
+    let size = image.texture_descriptor.size;
+    let size = Vec2::new(size.width as f32, size.height as f32);
+    let image_handle = images.add(image);
+    (image_handle, size)
+}
+
 fn player_laser_hit_enemy(
     mut commands: Commands,
-    laser_query: Query<(Entity, &Transform, &Sprite), (With<Laser>, With<FromPlayer>)>,
-    enemy_query: Query<(Entity, &Transform, &Sprite), With<Enemy>>,
+    sprite_infos: Res<SpriteInfos>,
+    laser_query: Query<(Entity, &Transform), (With<Laser>, With<FromPlayer>)>,
+    enemy_query: Query<(Entity, &Transform), With<Enemy>>,
     mut active_enemies: ResMut<ActiveEnemies>,
 ) {
     let mut enemies_blasted: HashSet<Entity> = HashSet::new();
 
-    for (laser_entity, laser_transform, laser_sprite) in laser_query.iter() {
-        for (enemy_entity, enemy_transform, enemy_sprite) in enemy_query.iter() {
-            let laser_scale = Vec2::from(laser_transform.scale);
-            let enemy_scale = Vec2::from(enemy_transform.scale);
+    for (laser_entity, laser_transform) in laser_query.iter() {
+        let player_laser_size = sprite_infos.player_laser.1;
+        let player_laser_scale = Vec2::from(laser_transform.scale.abs().xy());
+
+        for (enemy_entity, enemy_transform) in enemy_query.iter() {
+            let enemy_size = sprite_infos.enemy.1;
+            let enemy_scale = Vec2::from(enemy_transform.scale.xy());
             let collision = collide(
                 laser_transform.translation,
-                laser_sprite.size * laser_scale,
+                player_laser_size * player_laser_scale,
                 enemy_transform.translation,
-                enemy_sprite.size * enemy_scale);
+                enemy_size * enemy_scale);
 
             if let Some(_) = collision {
                 if enemies_blasted.get(&enemy_entity).is_none() {
@@ -175,34 +214,38 @@ fn player_laser_hit_enemy(
 
 fn enemy_laser_hit_player(
     mut commands: Commands,
+    sprite_infos: Res<SpriteInfos>,
     mut player_state: ResMut<PlayerState>,
     time: Res<Time>,
-    laser_query: Query<(Entity, &Transform, &Sprite), (With<Laser>, With<FromEnemy>)>,
-    player_query: Query<(Entity, &Transform, &Sprite), With<Player>>,
+    laser_query: Query<(Entity, &Transform), (With<Laser>, With<FromEnemy>)>,
+    player_query: Query<(Entity, &Transform), With<Player>>,
 ) {
-    if let Ok((player_entity, player_transform, player_sprite)) = player_query.single() {
-        let player_size = player_sprite.size * Vec2::from(player_transform.scale.abs());
+    if let Ok((player_entity, player_transform)) = player_query.get_single() {
+        let player_size = sprite_infos.player.1;
+        let player_scale = Vec2::from(player_transform.scale.xy());
 
-        for (laser_entity, laser_transform, laser_sprite) in laser_query.iter() {
-                let laser_scale = Vec2::from(laser_transform.scale.abs());
-                let collision = collide(
-                    laser_transform.translation,
-                    laser_sprite.size * laser_scale,
-                    player_transform.translation,
-                    player_size);
+        for (laser_entity, laser_transform) in laser_query.iter() {
+            let laser_size = sprite_infos.enemy_laser.1;
+            let laser_scale = Vec2::from(laser_transform.scale.abs().xy());
 
-                if let Some(_) = collision {
-                    // remove the player
-                    commands.entity(player_entity).despawn();
-                    player_state.shot(time.seconds_since_startup());
+            let collision = collide(
+                laser_transform.translation,
+                laser_size * laser_scale,
+                player_transform.translation,
+                player_size * player_scale);
 
-                    // remove the laser
-                    commands.entity(laser_entity).despawn();
+            if let Some(_) = collision {
+                // remove the player
+                commands.entity(player_entity).despawn();
+                player_state.shot(time.seconds_since_startup());
 
-                    // spawn explosion to spawn
-                    commands
-                        .spawn()
-                        .insert(ExplosionToSpawn(player_transform.translation.clone()));
+                // remove the laser
+                commands.entity(laser_entity).despawn();
+
+                // spawn explosion to spawn
+                commands
+                    .spawn()
+                    .insert(ExplosionToSpawn(player_transform.translation.clone()));
             }
         }
     }
@@ -212,12 +255,12 @@ fn enemy_laser_hit_player(
 fn explosion_to_spawn(
     mut commands: Commands,
     query: Query<(Entity, &ExplosionToSpawn)>,
-    materials: Res<Materials>,
+    sprite_infos: Res<SpriteInfos>,
 ) {
     for (explosion_spawn_entity, explosion_to_spawn) in query.iter() {
         commands
             .spawn_bundle( SpriteSheetBundle {
-                texture_atlas: materials.explosion.clone(),
+                texture_atlas: sprite_infos.explosion.clone(),
                 transform: Transform {
                     translation: explosion_to_spawn.0,
                     ..Default::default()
@@ -246,7 +289,7 @@ fn animate_explosion(
             let texture_atlas = texture_atlases.get(texture_atlas_handle).unwrap();
             sprite.index += 1;
 
-            if sprite.index == texture_atlas.textures.len() as u32 {
+            if sprite.index == texture_atlas.textures.len() {
                 commands.entity(entity).despawn();
             }
         }

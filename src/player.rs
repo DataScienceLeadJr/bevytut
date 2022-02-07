@@ -1,11 +1,26 @@
-use bevy::{prelude::*, core::FixedTimestep};
+use bevy::{
+    prelude::*,
+    core::FixedTimestep,
+};
 
-use crate::{Player, PlayerReadyFire, Speed, TIME_STEP, Materials, Laser, WinSize, FromPlayer, SCALE, PlayerState, PLAYER_RESPAWN_DELAY};
+use crate::{
+    Player,
+    PlayerReadyFire,
+    Speed,
+    TIME_STEP,
+    SpriteInfos,
+    Laser,
+    WinSize,
+    FromPlayer,
+    SCALE,
+    PlayerState,
+    PLAYER_RESPAWN_DELAY,
+};
 
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
-    fn build(&self, app: &mut AppBuilder) {
+    fn build(&self, app: &mut App) {
         app
         .insert_resource(PlayerState::default())
         .add_startup_stage("game_setup_actors", SystemStage::single(player_spawn.system()))
@@ -22,7 +37,7 @@ impl Plugin for PlayerPlugin {
 
 fn player_spawn(
     mut commands: Commands,
-    materials: Res<Materials>,
+    textures: Res<SpriteInfos>,
     win_size: Res<WinSize>,
     time: Res<Time>,
     mut player_state: ResMut<PlayerState>
@@ -35,7 +50,7 @@ fn player_spawn(
         let bottom = -win_size.height / 2.0;
         commands
             .spawn_bundle(SpriteBundle {
-                material: materials.player_materials.clone(),
+                texture: textures.player.0.clone(),
                 transform: Transform {
                     translation: Vec3::new(0.0, bottom + 75.0 / 4.0 + 5.0, 10.0),
                     scale: Vec3::new(SCALE, SCALE, 1.0),
@@ -53,9 +68,9 @@ fn player_spawn(
 
 fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
-    mut query: Query<(&Speed, &mut Transform, With<Player>)>
+    mut query: Query<(&Speed, &mut Transform), With<Player>>
 ) {
-    if let Ok((speed, mut transform, _player)) = query.single_mut() {
+    if let Ok((speed, mut transform)) = query.get_single_mut() {
         let dir = if keyboard_input.pressed(KeyCode::Left) {
             -1.0
         } else if keyboard_input.pressed(KeyCode::Right) {
@@ -70,16 +85,16 @@ fn player_movement(
 fn player_fire(
     mut commands: Commands,
     keyboard_input: Res<Input<KeyCode>>,
-    materials: Res<Materials>,
+    textures: Res<SpriteInfos>,
     mut query: Query<(&Transform, &mut PlayerReadyFire), With<Player>>
 ) {
-    if let Ok((player_tf, mut ready_fire)) = query.single_mut() {
+    if let Ok((player_tf, mut ready_fire)) = query.get_single_mut() {
         if ready_fire.0 && keyboard_input.pressed(KeyCode::Space) {
             let x = player_tf.translation.x;
             let y = player_tf.translation.y + 19.0; // manually defined "claw height" offset
             let mut spawn_laser = |x_offset: f32| {
                 commands.spawn_bundle(SpriteBundle {
-                    material: materials.player_laser.clone(),
+                    texture: textures.player_laser.0.clone(),
                     transform: Transform {
                         translation: Vec3::new(x + x_offset, y, 0.0),
                         ..Default::default()
