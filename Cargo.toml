@@ -7,5 +7,9 @@ edition = "2021"
 bevy = "0.6"
 rand = "0.8"
 
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+rustflags = ["-Zshare-generics=off"]
+
 [workspace]
 resolver = "2" # Important for wgpu/Bevy, but why?

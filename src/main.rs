@@ -23,7 +23,7 @@ const EXPLOSION_SHEET: &str = "explo_a_sprite.png";
 
 const TIME_STEP: f32 = 1.0 / 60.0;
 const SCALE: f32 = 0.5;
-const MAX_ENEMIES: u32 = 6;
+const MAX_ENEMIES: u32 = 4;
 const MAX_FORMATION_MEMBERS: u32 = 2;
 const PLAYER_RESPAWN_DELAY: f64 = 2.0;
 
