@@ -1,4 +1,4 @@
-# bevytut
+# Bevy Engine Tutorials followed
 First: following Jeremy Chone's youtube tutorial.
 
 Second: expand to include arg for choosing "invaders" or "game of life".
